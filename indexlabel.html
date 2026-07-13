@@ -1,0 +1,669 @@
+
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Laufkarten Generator</title>
+    <meta name="theme-color" content="#000000">
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- QR Code Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        oled: { black: '#000000', base: '#0A0A0C', surface: '#121214', elevated: '#1C1C1E', border: '#2A2A2E' }
+                    },
+                    fontFamily: { sans: ['Plus Jakarta Sans', 'sans-serif'], },
+                    transitionTimingFunction: { 'spring': 'cubic-bezier(0.2, 0.8, 0.2, 1)', }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
+        
+        :root {
+            --safe-area-inset-bottom: env(safe-area-inset-bottom, 24px);
+            --safe-area-inset-top: env(safe-area-inset-top, 0px);
+        }
+
+        body, html {
+            font-family: 'Plus Jakarta Sans', sans-serif; 
+            -webkit-tap-highlight-color: transparent;
+            background-color: #000000; 
+            color: #ffffff; 
+            margin: 0; padding: 0;
+            min-height: 100vh;
+        }
+
+        .dark-inputs input, .dark-inputs textarea, .dark-inputs select { color-scheme: dark; }
+
+        /* Custom Scrollbar for the preview area */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #2A2A2E; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #3f3f46; }
+
+        /* QR Code Scaling Fix */
+        #qrcode-container canvas, #qrcode-container img {
+            width: 100% !important;
+            max-width: 140px !important;
+            height: auto !important;
+            display: block;
+            margin: 0 auto;
+        }
+
+        /* PIN Input Styling */
+        .pin-digit {
+            width: 3rem; height: 4rem; font-size: 2rem; text-align: center; font-weight: 900;
+            background: #1C1C1E; border: 2px solid #2A2A2E; border-radius: 12px; color: white;
+            outline: none; transition: border-color 0.2s;
+        }
+        .pin-digit:focus { border-color: #3b82f6; background: #000; }
+
+        @media print {
+            #app-wrapper { display: none !important; } 
+            #decoder-wrapper { display: none !important; }
+            body { background: white !important; }
+        }
+    </style>
+</head>
+<body class="dark-inputs bg-black">
+
+    <!-- ========================================== -->
+    <!-- 1. GENERATOR ANSICHT (Standard)           -->
+    <!-- ========================================== -->
+    <div id="app-wrapper" class="min-h-screen flex flex-col lg:flex-row w-full relative">
+        
+        <!-- Toast Notification -->
+        <div id="toast" class="fixed top-4 left-1/2 -translate-x-1/2 z-[100] bg-oled-surface border border-oled-border text-white text-[13px] font-bold px-6 py-3.5 rounded-full shadow-2xl flex items-center gap-3 transform -translate-y-20 opacity-0 transition-all duration-400 pointer-events-none">
+            <div class="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]"></div>
+            <span id="toast-message" class="tracking-wide">Aktion erfolgreich!</span>
+        </div>
+
+        <!-- LEFT/TOP SIDE: EDITOR FORM -->
+        <div class="w-full lg:w-[45%] flex flex-col bg-black border-r border-oled-border h-auto lg:h-screen lg:overflow-y-auto">
+            <div class="p-6 pb-2 sticky top-0 bg-black/80 backdrop-blur-md z-10 border-b border-oled-border/50">
+                <h1 class="text-2xl font-black tracking-tight bg-gradient-to-r from-white to-gray-400 bg-clip-text text-transparent">Label Generator</h1>
+                <p class="text-[11px] font-bold text-gray-500 uppercase tracking-widest mt-1">Individuelle Beschriftung & QR</p>
+            </div>
+
+            <div class="p-6 space-y-4 pb-32">
+                <!-- Dokumententitel -->
+                <div class="bg-oled-elevated p-4 rounded-[24px] border border-oled-border focus-within:border-white focus-within:bg-oled-base transition-all">
+                    <label class="block text-[11px] text-gray-400 font-bold tracking-widest mb-1">DOKUMENTEN-TITEL</label>
+                    <input type="text" id="input-doc-title" oninput="updatePreview()" class="w-full bg-transparent text-xl font-black text-white focus:outline-none" placeholder="z.B. Laufkarte" value="Laufkarte">
+                </div>
+
+                <!-- ID & Status -->
+                <div class="grid grid-cols-2 gap-3">
+                    <div class="bg-oled-elevated p-4 rounded-[24px] border border-oled-border focus-within:border-white focus-within:bg-oled-base transition-all">
+                        <label class="block text-[11px] text-gray-500 font-bold tracking-widest mb-1">ID / IDENTIFIKATOR</label>
+                        <input type="text" id="input-id" oninput="updatePreview()" class="w-full bg-transparent text-base font-bold text-white focus:outline-none" placeholder="z.B. L-1002" value="NEU-01">
+                    </div>
+                    <div class="bg-oled-elevated p-4 rounded-[24px] border border-oled-border focus-within:border-white focus-within:bg-oled-base transition-all">
+                        <label class="block text-[11px] text-gray-500 font-bold tracking-widest mb-1">STATUS</label>
+                        <input type="text" id="input-status" oninput="updatePreview()" class="w-full bg-transparent text-base font-bold text-white focus:outline-none" placeholder="z.B. Offen" value="Bereit">
+                    </div>
+                </div>
+
+                <!-- E-Mail, Versteckter Text & PIN Schutz -->
+                <div class="space-y-2 p-2 border border-blue-500/20 rounded-[32px] bg-blue-500/5">
+                    <div class="p-3">
+                        <label class="block text-[11px] text-blue-400 font-bold tracking-widest mb-1 flex items-center gap-2">
+                            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+                            E-MAIL EMPFÄNGER (FÜR QR-SCAN)
+                        </label>
+                        <input type="email" id="input-email" oninput="updatePreview()" class="w-full bg-transparent text-sm font-bold text-white placeholder-blue-500/40 focus:outline-none" placeholder="z.B. info@firma.de (optional)">
+                    </div>
+
+                    <div class="p-3 bg-black/40 rounded-[20px]">
+                        <label class="block text-[11px] text-purple-400 font-bold tracking-widest mb-1 flex items-center gap-2">
+                            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                            VERSTECKTER TEXT (NUR FÜR E-MAIL)
+                        </label>
+                        <textarea id="input-hidden-email" oninput="updatePreview()" rows="2" placeholder="Dieser Text erscheint nicht auf der Karte..." class="w-full bg-transparent text-sm font-semibold text-purple-200 placeholder-purple-500/40 focus:outline-none resize-none"></textarea>
+                    </div>
+
+                    <!-- Foto Link Workaround -->
+                    <div class="p-3 bg-black/40 rounded-[20px]">
+                        <label class="block text-[11px] text-purple-400 font-bold tracking-widest mb-1 flex items-center gap-2">
+                            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                            FOTO-LINK / CLOUD-URL (OPTIONAL)
+                        </label>
+                        <input type="url" id="input-photo-url" oninput="updatePreview()" class="w-full bg-transparent text-sm font-semibold text-purple-200 placeholder-purple-500/40 focus:outline-none" placeholder="z.B. https://1drv.ms/f/s!...">
+                        <p class="text-[9px] text-purple-500/70 mt-1 font-semibold leading-tight">Direktes Anhängen von Fotodateien ist über den Browser nicht möglich. Hier einen Freigabe-Link einfügen oder das Bild später manuell in der E-Mail App anhängen.</p>
+                    </div>
+
+                    <!-- PIN Schutz Toggle -->
+                    <div class="p-3 pt-1 border-t border-blue-500/10 flex items-center justify-between">
+                        <div>
+                            <label class="text-sm text-blue-300 font-black tracking-wide flex items-center gap-2">
+                                🔒 QR-Code mit PIN schützen
+                            </label>
+                            <p class="text-[9px] text-blue-500/70 mt-1 font-semibold leading-tight max-w-[200px]">Nur wer die PIN kennt, kann den Code scannen und die E-Mail senden.</p>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <input type="text" id="input-pin" maxlength="4" oninput="updatePreview()" class="w-16 h-10 bg-black border border-blue-500/30 rounded-xl text-center font-mono font-black text-white text-lg focus:border-blue-400 outline-none hidden" placeholder="1010" value="1010">
+                            <button id="btn-pin-toggle" onclick="togglePin()" class="relative inline-flex h-8 w-14 items-center rounded-full transition-colors focus:outline-none bg-gray-600">
+                                <span id="knob-pin-toggle" class="inline-block h-6 w-6 translate-x-1 rounded-full bg-white transition-transform"></span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Kunde & Typ -->
+                <div class="grid grid-cols-2 gap-3">
+                    <div class="bg-oled-elevated p-4 rounded-[24px] border border-oled-border focus-within:border-white focus-within:bg-oled-base transition-all">
+                        <label class="block text-[11px] text-gray-500 font-bold tracking-widest mb-1">KUNDE / ABT</label>
+                        <input type="text" id="input-kunde" oninput="updatePreview()" class="w-full bg-transparent text-base font-bold text-white focus:outline-none" placeholder="Intern / Kunde" value="INTERN">
+                    </div>
+                    <div class="bg-oled-elevated p-4 rounded-[24px] border border-oled-border focus-within:border-white focus-within:bg-oled-base transition-all">
+                        <label class="block text-[11px] text-gray-500 font-bold tracking-widest mb-1">TERMIN / KW</label>
+                        <input type="text" id="input-termin" oninput="updatePreview()" class="w-full bg-transparent text-base font-bold text-white focus:outline-none" placeholder="Ohne Termin" value="ASAP">
+                    </div>
+                </div>
+
+                <div class="bg-oled-elevated p-4 rounded-[24px] border border-oled-border focus-within:border-white focus-within:bg-oled-base transition-all">
+                    <label class="block text-[11px] text-gray-500 font-bold tracking-widest mb-1">BEZEICHNUNG / TYP</label>
+                    <input type="text" id="input-bez" oninput="updatePreview()" class="w-full bg-transparent text-base font-bold text-white focus:outline-none" placeholder="Was ist es?" value="Allgemeines Bauteil">
+                </div>
+
+                <!-- Zeichnung & Menge -->
+                <div class="grid grid-cols-2 gap-3">
+                    <div class="bg-oled-elevated p-4 rounded-[24px] border border-oled-border focus-within:border-white focus-within:bg-oled-base transition-all">
+                        <label class="block text-[11px] text-gray-500 font-bold tracking-widest mb-1">ZEICHNUNG</label>
+                        <input type="text" id="input-zeichnung" oninput="updatePreview()" class="w-full bg-transparent text-sm font-mono text-white focus:outline-none" placeholder="-">
+                    </div>
+                    <div class="bg-oled-elevated p-4 rounded-[24px] border border-oled-border focus-within:border-emerald-500 focus-within:bg-oled-base transition-all">
+                        <label class="block text-[11px] text-gray-500 font-bold tracking-widest mb-1">MENGE</label>
+                        <input type="number" id="input-menge" oninput="updatePreview()" class="w-full bg-transparent text-lg font-black text-emerald-400 focus:outline-none" value="1">
+                    </div>
+                </div>
+
+                <!-- Achtung / Fehlteil Toggle -->
+                <div class="bg-rose-500/10 p-5 rounded-[24px] border border-rose-500/30">
+                    <div class="flex items-center justify-between cursor-pointer" onclick="toggleFehlteil()">
+                        <label class="text-sm text-rose-400 font-black tracking-wide flex items-center gap-2 cursor-pointer pointer-events-none">
+                            <span class="text-lg">⚠️</span> Warnung / Fehlteil aktivieren
+                        </label>
+                        <button id="btn-is-fehlteil" class="relative inline-flex h-8 w-14 items-center rounded-full transition-colors focus:outline-none bg-gray-600 pointer-events-none">
+                            <span id="knob-is-fehlteil" class="inline-block h-6 w-6 translate-x-1 rounded-full bg-white transition-transform"></span>
+                        </button>
+                    </div>
+                    <div id="fehlteil-details" class="mt-4 hidden">
+                        <textarea id="input-fehlteile" oninput="updatePreview()" rows="2" placeholder="Was fehlt / Was ist das Problem?" class="w-full bg-black/50 border border-rose-500/30 rounded-2xl p-4 text-sm font-bold text-rose-300 placeholder-rose-500/40 focus:outline-none focus:border-rose-500 transition-all resize-none"></textarea>
+                    </div>
+                </div>
+
+                <!-- Notiz -->
+                <div class="bg-amber-500/5 p-4 rounded-[24px] border border-amber-500/20 focus-within:border-amber-500 focus-within:bg-amber-500/10 transition-all">
+                    <label class="block text-[11px] text-amber-500 font-bold tracking-widest mb-1">KOMMENTAR / NOTIZ</label>
+                    <textarea id="input-notiz" oninput="updatePreview()" rows="2" placeholder="Wichtige Infos..." class="w-full bg-transparent text-sm font-semibold text-amber-200 placeholder-amber-500/40 focus:outline-none resize-none"></textarea>
+                </div>
+
+                <!-- DRUCK EINSTELLUNGEN -->
+                <div class="bg-oled-elevated p-4 rounded-[24px] border border-oled-border">
+                    <label class="block text-[11px] text-gray-500 font-bold tracking-widest mb-3">DRUCK-FORMAT (PAPIER-AUSRICHTUNG)</label>
+                    <div class="flex gap-2">
+                        <label class="flex-1 cursor-pointer">
+                            <input type="radio" name="orientation" value="portrait" checked class="peer sr-only" onchange="updatePreview()">
+                            <div class="text-center py-2 rounded-xl bg-black border border-oled-border peer-checked:border-white peer-checked:bg-white peer-checked:text-black font-bold text-sm transition-all">Hochformat</div>
+                        </label>
+                        <label class="flex-1 cursor-pointer">
+                            <input type="radio" name="orientation" value="landscape" class="peer sr-only" onchange="updatePreview()">
+                            <div class="text-center py-2 rounded-xl bg-black border border-oled-border peer-checked:border-white peer-checked:bg-white peer-checked:text-black font-bold text-sm transition-all">Querformat</div>
+                        </label>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Fixed Print Button for Mobile -->
+            <div class="fixed lg:sticky bottom-0 left-0 right-0 lg:right-auto lg:w-full p-4 bg-gradient-to-t from-black via-black to-transparent z-20 pointer-events-none">
+                <button onclick="printLaufkarte()" class="w-full h-14 bg-white text-black rounded-[24px] text-base font-black active:scale-95 transition-transform shadow-[0_0_30px_rgba(255,255,255,0.2)] pointer-events-auto flex items-center justify-center gap-3">
+                    <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg>
+                    Dokument Drucken
+                </button>
+            </div>
+        </div>
+
+        <!-- RIGHT/BOTTOM SIDE: LIVE PREVIEW -->
+        <div class="w-full lg:w-[55%] bg-[#0A0A0C] p-4 lg:p-10 flex items-start justify-center overflow-y-auto min-h-[80vh] lg:h-screen">
+            
+            <div id="laufkarte-sheet" class="w-full max-w-[420px] bg-[#f8f9fa] text-black rounded-[40px] shadow-2xl flex flex-col overflow-hidden transition-all duration-300 transform border border-gray-200/50 mt-6 lg:mt-0 mb-32 lg:mb-10">
+                <div class="p-8 bg-[#f8f9fa] relative flex-1">
+                    <div class="flex items-center gap-3 mb-6 border-b-2 border-gray-200 pb-4">
+                        <svg width="28" height="28" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <rect width="40" height="40" fill="#004b87"/>
+                            <path d="M26 12C26 12 24.5 10 20 10C15.5 10 13 13 13 16C13 21 27 20 27 25C27 30 23 32 19 32C14.5 32 13 29 13 29" stroke="white" stroke-width="4" stroke-linecap="round"/>
+                        </svg>
+                        <div class="flex flex-col">
+                            <span class="text-[#004b87] font-black text-base leading-none tracking-tight">SIEBENHAAR</span>
+                            <span class="text-gray-500 text-[9px] leading-tight font-bold tracking-wider mt-0.5">PRODUKTION</span>
+                        </div>
+                    </div>
+
+                    <div class="flex justify-between items-start mb-8 gap-2">
+                        <div class="flex-1 min-w-0">
+                            <h2 id="prev-doc-title" class="text-3xl font-black text-black tracking-tight leading-none break-words">Laufkarte</h2>
+                            <p id="prev-id" class="text-sm font-mono font-bold text-gray-500 mt-2">NEU-01</p>
+                        </div>
+                        <span id="prev-status" class="px-3 py-1.5 bg-gray-200 rounded-xl text-[10px] font-black uppercase tracking-widest text-black max-w-[120px] text-center truncate shrink-0 mt-1">Bereit</span>
+                    </div>
+
+                    <div class="space-y-5">
+                        <div class="grid grid-cols-2 gap-5">
+                            <div><span class="text-[10px] uppercase font-bold text-gray-400 block mb-1">Kunde/Abt.</span><span id="prev-kunde" class="font-black text-black text-base break-words">INTERN</span></div>
+                            <div><span class="text-[10px] uppercase font-bold text-gray-400 block mb-1">Termin</span><span id="prev-termin" class="font-black text-rose-600 text-base bg-rose-100 px-2 py-0.5 rounded-md break-words inline-block">ASAP</span></div>
+                        </div>
+                        <div><span class="text-[10px] uppercase font-bold text-gray-400 block mb-1">Bezeichnung/Typ</span><span id="prev-bez" class="font-black text-black text-lg leading-tight break-words">Allgemeines Bauteil</span></div>
+                        
+                        <div class="grid grid-cols-2 gap-5 bg-white p-4 rounded-[24px] border border-gray-200 shadow-sm">
+                            <div><span class="text-[10px] uppercase font-bold text-gray-400 block mb-1">Zeichnung</span><span id="prev-zeichnung" class="font-mono font-bold text-gray-700 text-sm break-all">-</span></div>
+                            <div><span class="text-[10px] uppercase font-bold text-gray-400 block mb-1">Menge</span><span id="prev-menge" class="font-black text-emerald-600 text-2xl leading-none block mt-1">1</span></div>
+                        </div>
+                    </div>
+
+                    <div id="prev-extras" class="mt-5 space-y-3 hidden"></div>
+
+                    <div class="mt-8 flex flex-col items-center justify-center border-t-2 border-dashed border-gray-300 pt-8 relative">
+                        <div id="qrcode-container" class="p-4 bg-white border-2 border-gray-200 rounded-[28px] shadow-sm w-full max-w-[200px] aspect-square flex items-center justify-center overflow-hidden transition-all"></div>
+                        <span id="qr-label-text" class="text-[10px] font-black text-gray-400 mt-4 uppercase tracking-widest bg-gray-200 px-4 py-1.5 rounded-full text-center flex items-center gap-1.5">
+                            <span id="qr-lock-icon" class="hidden">🔒</span> Scan Digital
+                        </span>
+                    </div>
+                </div>
+            </div>
+            
+        </div>
+    </div> 
+
+    <!-- ========================================== -->
+    <!-- 2. DECODER ANSICHT (Sperrbildschirm)       -->
+    <!-- ========================================== -->
+    <div id="decoder-wrapper" class="hidden min-h-screen w-full bg-black flex-col items-center justify-center p-6 relative">
+        <div class="absolute inset-0 bg-blue-900/10 blur-[100px] pointer-events-none"></div>
+        
+        <!-- PIN ENTRY VIEW -->
+        <div id="decoder-pin-view" class="w-full max-w-sm flex flex-col items-center text-center z-10 transition-all duration-500">
+            <div class="w-20 h-20 bg-blue-500/20 rounded-full flex items-center justify-center mb-6 border border-blue-500/30">
+                <svg class="w-10 h-10 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                </svg>
+            </div>
+            <h2 class="text-3xl font-black text-white mb-2 tracking-tight">Dokument gesperrt</h2>
+            <p class="text-gray-400 font-semibold mb-10 text-sm">Bitte gib die 4-stellige PIN ein, um die Daten und E-Mail freizuschalten.</p>
+            
+            <div class="flex gap-3 mb-8" id="pin-inputs">
+                <input type="password" inputmode="numeric" maxlength="1" class="pin-digit" onkeyup="moveToNext(this, 1)" id="d1">
+                <input type="password" inputmode="numeric" maxlength="1" class="pin-digit" onkeyup="moveToNext(this, 2)" id="d2">
+                <input type="password" inputmode="numeric" maxlength="1" class="pin-digit" onkeyup="moveToNext(this, 3)" id="d3">
+                <input type="password" inputmode="numeric" maxlength="1" class="pin-digit" onkeyup="moveToNext(this, 4)" id="d4">
+            </div>
+
+            <button onclick="checkPin()" class="w-full bg-blue-600 hover:bg-blue-500 text-white rounded-[24px] py-4 text-lg font-black active:scale-95 transition-all shadow-[0_0_30px_rgba(37,99,235,0.4)]">
+                Entsperren
+            </button>
+            <p id="pin-error" class="text-rose-500 font-bold mt-4 opacity-0 transition-opacity">Falsche PIN. Bitte erneut versuchen.</p>
+        </div>
+
+        <!-- UNLOCKED CONTENT VIEW -->
+        <div id="decoder-content-view" class="w-full max-w-lg hidden flex-col z-10 transition-all duration-500 opacity-0 translate-y-10">
+            <div class="flex items-center justify-between mb-8">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 bg-emerald-500/20 rounded-full flex items-center justify-center border border-emerald-500/30">
+                        <svg class="w-5 h-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+                    </div>
+                    <h2 class="text-2xl font-black text-white tracking-tight">Entschlüsselt</h2>
+                </div>
+            </div>
+
+            <div class="bg-oled-surface border border-oled-border rounded-[32px] p-6 mb-6">
+                <div class="flex justify-between items-start border-b border-oled-border pb-4 mb-4">
+                    <div>
+                        <h3 id="dec-doc-title" class="text-xl font-black text-white">Laufkarte</h3>
+                        <p id="dec-id" class="text-gray-400 font-mono font-bold mt-1 text-sm">ID</p>
+                    </div>
+                    <span id="dec-status" class="bg-oled-elevated text-white px-3 py-1 rounded-lg text-xs font-bold border border-oled-border">Status</span>
+                </div>
+                
+                <div class="grid grid-cols-2 gap-4 mb-4">
+                    <div><p class="text-[10px] text-gray-500 uppercase font-bold tracking-widest">Kunde</p><p id="dec-kunde" class="text-white font-bold text-sm">Kunde</p></div>
+                    <div><p class="text-[10px] text-gray-500 uppercase font-bold tracking-widest">Termin</p><p id="dec-termin" class="text-rose-400 font-bold text-sm">Termin</p></div>
+                </div>
+                <div class="mb-4">
+                    <p class="text-[10px] text-gray-500 uppercase font-bold tracking-widest">Bezeichnung</p>
+                    <p id="dec-bez" class="text-white font-bold text-base">Bez</p>
+                </div>
+                
+                <div id="dec-warnings" class="space-y-3 mt-4 pt-4 border-t border-oled-border empty:hidden"></div>
+            </div>
+
+            <button id="btn-send-mail" onclick="triggerDecryptedMail()" class="w-full bg-emerald-500 text-black rounded-[24px] py-4 text-lg font-black active:scale-95 transition-all shadow-[0_0_30px_rgba(16,185,129,0.3)] flex items-center justify-center gap-3">
+                <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+                E-Mail jetzt senden
+            </button>
+        </div>
+    </div>
+
+    <!-- Hidden IFrame for Printing -->
+    <iframe id="print-iframe" style="position: absolute; width: 1px; height: 1px; border: 0; right: 0; bottom: 0; opacity: 0; pointer-events: none; z-index: -1;"></iframe>
+
+    <script>
+        // GLOBALE VARIABLEN
+        var isFehlteilActive = false;
+        var isPinProtected = false;
+        var qrCodeObj = null;
+        var encryptedUrlPayload = "";
+        var decryptedMailUrl = "";
+
+        // ========================================================
+        // 1. SIMPLE ENCRYPTION LOGIC (XOR + BASE64)
+        // ========================================================
+        function xorEncrypt(text, pin) {
+            let res = '';
+            for(let i=0; i<text.length; i++) {
+                res += String.fromCharCode(text.charCodeAt(i) ^ pin.charCodeAt(i % pin.length));
+            }
+            return btoa(encodeURIComponent(res));
+        }
+
+        function xorDecrypt(b64, pin) {
+            try {
+                let text = decodeURIComponent(atob(b64));
+                let res = '';
+                for(let i=0; i<text.length; i++) {
+                    res += String.fromCharCode(text.charCodeAt(i) ^ pin.charCodeAt(i % pin.length));
+                }
+                return res;
+            } catch(e) { return null; }
+        }
+
+        // ========================================================
+        // 2. APP INITIALISIERUNG (Router: Generator oder Decoder?)
+        // ========================================================
+        window.addEventListener('DOMContentLoaded', function() {
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.has('locked')) {
+                // SPERRBILDSCHIRM MODUS
+                encryptedUrlPayload = urlParams.get('locked');
+                document.getElementById('app-wrapper').classList.add('hidden');
+                document.getElementById('decoder-wrapper').classList.replace('hidden', 'flex');
+                document.getElementById('d1').focus();
+            } else {
+                // GENERATOR MODUS
+                setTimeout(updatePreview, 100);
+            }
+        });
+
+        // ========================================================
+        // 3. GENERATOR LOGIK (Editor, PIN Toggle, Live-Preview)
+        // ========================================================
+        function toggleFehlteil() {
+            isFehlteilActive = !isFehlteilActive;
+            var btn = document.getElementById('btn-is-fehlteil'); var knob = document.getElementById('knob-is-fehlteil'); var detailsDiv = document.getElementById('fehlteil-details');
+            if (isFehlteilActive) { 
+                btn.classList.replace('bg-gray-600', 'bg-rose-500'); knob.classList.replace('translate-x-1', 'translate-x-7'); detailsDiv.classList.remove('hidden'); 
+            } else { 
+                btn.classList.replace('bg-rose-500', 'bg-gray-600'); knob.classList.replace('translate-x-7', 'translate-x-1'); detailsDiv.classList.add('hidden'); 
+                document.getElementById('input-fehlteile').value = '';
+            }
+            updatePreview();
+        }
+
+        function togglePin() {
+            isPinProtected = !isPinProtected;
+            var btn = document.getElementById('btn-pin-toggle'); var knob = document.getElementById('knob-pin-toggle'); var pinInput = document.getElementById('input-pin');
+            if (isPinProtected) { 
+                btn.classList.replace('bg-gray-600', 'bg-blue-500'); knob.classList.replace('translate-x-1', 'translate-x-7'); pinInput.classList.remove('hidden'); 
+            } else { 
+                btn.classList.replace('bg-blue-500', 'bg-gray-600'); knob.classList.replace('translate-x-7', 'translate-x-1'); pinInput.classList.add('hidden'); 
+            }
+            updatePreview();
+        }
+
+        function updatePreview() {
+            // Werte lesen
+            var docTitle = document.getElementById('input-doc-title').value.trim() || "Laufkarte";
+            var id = document.getElementById('input-id').value.trim() || "-";
+            var status = document.getElementById('input-status').value.trim() || "-";
+            var kunde = document.getElementById('input-kunde').value.trim() || "-";
+            var termin = document.getElementById('input-termin').value.trim() || "-";
+            var bez = document.getElementById('input-bez').value.trim() || "-";
+            var zeichnung = document.getElementById('input-zeichnung').value.trim() || "-";
+            var menge = document.getElementById('input-menge').value.trim() || "1";
+            var email = document.getElementById('input-email').value.trim();
+            var hiddenEmailText = document.getElementById('input-hidden-email').value.trim();
+            var photoUrl = document.getElementById('input-photo-url').value.trim();
+            var fehlteile = document.getElementById('input-fehlteile').value.trim();
+            var notiz = document.getElementById('input-notiz').value.trim();
+            var pinCode = document.getElementById('input-pin').value.trim() || "1010";
+
+            // Preview Kartentexte setzen
+            document.getElementById('prev-doc-title').innerText = docTitle; document.getElementById('prev-id').innerText = id;
+            document.getElementById('prev-status').innerText = status; document.getElementById('prev-kunde').innerText = kunde;
+            document.getElementById('prev-termin').innerText = termin; document.getElementById('prev-bez').innerText = bez;
+            document.getElementById('prev-zeichnung').innerText = zeichnung; document.getElementById('prev-menge').innerText = menge;
+
+            // Warnungen / Notizen Boxen bauen
+            var extrasContainer = document.getElementById('prev-extras'); var extrasHtml = '';
+            if (isFehlteilActive) extrasHtml += `<div class="bg-rose-50 border-2 border-rose-500 p-4 rounded-2xl"><h4 class="text-[12px] font-black text-rose-600 uppercase mb-1">Achtung: Fehlteil / Warnung</h4><p class="text-base font-bold text-rose-900 leading-tight break-words">${escapeHtml(fehlteile).replace(/\n/g, '<br>') || 'Achtung markiert.'}</p></div>`;
+            if (notiz !== '') extrasHtml += `<div class="bg-amber-50 border-2 border-amber-500 p-4 rounded-2xl"><h4 class="text-[12px] font-black text-amber-600 uppercase mb-1">Kommentar / Notiz</h4><p class="text-base font-bold text-amber-900 leading-tight break-words">${escapeHtml(notiz).replace(/\n/g, '<br>')}</p></div>`;
+            if (extrasHtml !== '') { extrasContainer.innerHTML = extrasHtml; extrasContainer.classList.remove('hidden'); } else { extrasContainer.innerHTML = ''; extrasContainer.classList.add('hidden'); }
+
+            // JSON Datenobjekt für E-Mail Aufbau
+            var dataObj = { t: docTitle, i: id, s: status, k: kunde, d: termin, b: bez, z: zeichnung, m: menge, e: email, h: hiddenEmailText, p: photoUrl, warn: isFehlteilActive, f: fehlteile, n: notiz };
+            
+            // Standard E-Mail Body generieren (Wird in QR oder verschlüsselt gespeichert)
+            var subject = encodeURIComponent("Info zu " + docTitle + " / ID: " + id);
+            var bodyText = docTitle + "-Info:\r\n-------------------------\r\nID: " + id + "\r\nStatus: " + status + "\r\nKunde: " + kunde + "\r\nBezeichnung: " + bez + "\r\nZeichnung: " + zeichnung + "\r\nMenge: " + menge + "\r\nTermin: " + termin + "\r\n";
+            if (isFehlteilActive) bodyText += "\r\n⚠️ ACHTUNG: WARNUNG / FEHLTEIL!\r\nDetails: " + (fehlteile || "Keine Details") + "\r\n";
+            if (notiz) bodyText += "\r\nNotiz: " + notiz + "\r\n";
+            if (hiddenEmailText) bodyText += "\r\nInterne Info / Versteckter Text:\r\n" + hiddenEmailText + "\r\n";
+            if (photoUrl) bodyText += "\r\nAngehängtes Foto (Link öffnen):\r\n" + photoUrl + "\r\n";
+            
+            var mailToLink = email ? "mailto:" + email + "?subject=" + subject + "&body=" + encodeURIComponent(bodyText) : "Text: " + bodyText;
+
+            // QR Code Generierung
+            var qrText = mailToLink;
+            var qrLabel = email ? "SEND E-MAIL" : "SCAN DIGITAL";
+            var lockIcon = document.getElementById('qr-lock-icon');
+
+            if (isPinProtected) {
+                // ENCRYPTED MODE
+                var rawPayload = "VALID::" + JSON.stringify(dataObj);
+                var encrypted = xorEncrypt(rawPayload, pinCode);
+                var currentBaseUrl = window.location.href.split('?')[0]; // Eigene URL ohne Parameter
+                qrText = currentBaseUrl + "?locked=" + encrypted;
+                qrLabel = "GESPERRT (PIN)";
+                lockIcon.classList.remove('hidden');
+                document.getElementById('qrcode-container').classList.add('border-blue-500', 'bg-blue-50');
+            } else {
+                // NORMAL MODE
+                lockIcon.classList.add('hidden');
+                document.getElementById('qrcode-container').classList.remove('border-blue-500', 'bg-blue-50');
+            }
+
+            document.getElementById('qr-label-text').lastChild.nodeValue = " " + qrLabel;
+            
+            var qrContainer = document.getElementById('qrcode-container'); qrContainer.innerHTML = ""; 
+            try { 
+                qrCodeObj = new QRCode(qrContainer, { text: qrText, width: 400, height: 400, colorDark : isPinProtected ? "#1e3a8a" : "#000", colorLight : isPinProtected ? "#eff6ff" : "#fff", correctLevel : QRCode.CorrectLevel.L }); 
+            } catch (err) { document.getElementById('qr-label-text').innerText = "DATEN ZU GROSS"; }
+        }
+
+        // ========================================================
+        // 4. DECODER LOGIK (Sperrbildschirm Entschlüsselung)
+        // ========================================================
+        function moveToNext(input, index) {
+            if (input.value.length === 1 && index < 4) document.getElementById('d' + (index + 1)).focus();
+            if (index === 4 && input.value.length === 1) checkPin(); // Auto-Submit
+        }
+
+        function checkPin() {
+            var p1 = document.getElementById('d1').value; var p2 = document.getElementById('d2').value;
+            var p3 = document.getElementById('d3').value; var p4 = document.getElementById('d4').value;
+            var enteredPin = p1 + p2 + p3 + p4;
+            var errorMsg = document.getElementById('pin-error');
+
+            if (enteredPin.length < 4) {
+                errorMsg.innerText = "Bitte 4 Zahlen eingeben."; errorMsg.classList.remove('opacity-0'); return;
+            }
+
+            var decryptedStr = xorDecrypt(encryptedUrlPayload, enteredPin);
+
+            if (decryptedStr && decryptedStr.startsWith("VALID::")) {
+                // PIN KORREKT
+                errorMsg.classList.add('opacity-0');
+                var jsonData = decryptedStr.substring(7); // "VALID::" abschneiden
+                try {
+                    var obj = JSON.parse(jsonData);
+                    showUnlockedData(obj);
+                } catch(e) {
+                    errorMsg.innerText = "Daten fehlerhaft."; errorMsg.classList.remove('opacity-0');
+                }
+            } else {
+                // PIN FALSCH
+                errorMsg.innerText = "Falsche PIN. Bitte erneut versuchen."; errorMsg.classList.remove('opacity-0');
+                document.getElementById('d1').value = ''; document.getElementById('d2').value = ''; document.getElementById('d3').value = ''; document.getElementById('d4').value = ''; document.getElementById('d1').focus();
+            }
+        }
+
+        function showUnlockedData(obj) {
+            // UI Switch
+            document.getElementById('decoder-pin-view').classList.add('opacity-0', 'scale-95', 'pointer-events-none', 'absolute');
+            var contentView = document.getElementById('decoder-content-view');
+            contentView.classList.remove('hidden');
+            setTimeout(() => { contentView.classList.remove('opacity-0', 'translate-y-10'); }, 50);
+
+            // Populate Data
+            document.getElementById('dec-doc-title').innerText = obj.t || "Dokument";
+            document.getElementById('dec-id').innerText = "ID: " + (obj.i || "-");
+            document.getElementById('dec-status').innerText = obj.s || "-";
+            document.getElementById('dec-kunde').innerText = obj.k || "-";
+            document.getElementById('dec-termin').innerText = obj.d || "-";
+            document.getElementById('dec-bez').innerText = (obj.b || "-") + (obj.z && obj.z !== "-" ? " (" + obj.z + ")" : "") + " | Menge: " + (obj.m || "1");
+
+            var warnContainer = document.getElementById('dec-warnings');
+            var wHtml = "";
+            if (obj.warn) wHtml += `<div class="bg-rose-500/10 border border-rose-500/30 rounded-xl p-3"><p class="text-rose-400 font-black text-xs uppercase mb-1">⚠️ Warnung / Fehlteil</p><p class="text-rose-200 text-sm font-bold">${escapeHtml(obj.f).replace(/\n/g, '<br>') || "Markiert"}</p></div>`;
+            if (obj.n) wHtml += `<div class="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3"><p class="text-amber-500 font-black text-xs uppercase mb-1">Notiz</p><p class="text-amber-100 text-sm font-bold">${escapeHtml(obj.n).replace(/\n/g, '<br>')}</p></div>`;
+            if (obj.h) wHtml += `<div class="bg-purple-500/10 border border-purple-500/30 rounded-xl p-3"><p class="text-purple-400 font-black text-xs uppercase mb-1">Interne Info</p><p class="text-purple-200 text-sm font-bold">${escapeHtml(obj.h).replace(/\n/g, '<br>')}</p></div>`;
+            if (obj.p) wHtml += `<div class="bg-blue-500/10 border border-blue-500/30 rounded-xl p-3"><p class="text-blue-400 font-black text-xs uppercase mb-1">Foto / Link</p><a href="${escapeHtml(obj.p)}" target="_blank" class="text-blue-300 text-sm font-bold underline break-all">${escapeHtml(obj.p)}</a></div>`;
+            warnContainer.innerHTML = wHtml;
+
+            // Generate Mailto
+            if (obj.e) {
+                var subject = encodeURIComponent("Info zu " + obj.t + " / ID: " + obj.i);
+                var bodyText = obj.t + "-Info:\r\n-------------------------\r\nID: " + obj.i + "\r\nStatus: " + obj.s + "\r\nKunde: " + obj.k + "\r\nBezeichnung: " + obj.b + "\r\nZeichnung: " + obj.z + "\r\nMenge: " + obj.m + "\r\nTermin: " + obj.d + "\r\n";
+                if (obj.warn) bodyText += "\r\n⚠️ ACHTUNG: WARNUNG / FEHLTEIL!\r\nDetails: " + (obj.f || "Keine Details") + "\r\n";
+                if (obj.n) bodyText += "\r\nNotiz: " + obj.n + "\r\n";
+                if (obj.h) bodyText += "\r\nInterne Info:\r\n" + obj.h + "\r\n";
+                if (obj.p) bodyText += "\r\nAngehängtes Foto (Link öffnen):\r\n" + obj.p + "\r\n";
+                
+                decryptedMailUrl = "mailto:" + obj.e + "?subject=" + subject + "&body=" + encodeURIComponent(bodyText);
+            } else {
+                var btn = document.getElementById('btn-send-mail');
+                btn.innerText = "Keine E-Mail hinterlegt"; btn.classList.replace('bg-emerald-500', 'bg-gray-600'); btn.classList.replace('text-black', 'text-gray-400'); btn.style.pointerEvents = 'none';
+            }
+        }
+
+        function triggerDecryptedMail() {
+            if(decryptedMailUrl) window.location.href = decryptedMailUrl;
+        }
+
+        // ========================================================
+        // 5. DRUCK LOGIK
+        // ========================================================
+        function printLaufkarte() {
+            var docTitle = document.getElementById('input-doc-title').value.trim() || "Laufkarte";
+            var id = document.getElementById('input-id').value.trim() || "-";
+            var kunde = document.getElementById('input-kunde').value.trim() || "-";
+            var termin = document.getElementById('input-termin').value.trim() || "-";
+            var bez = document.getElementById('input-bez').value.trim() || "-";
+            var zeichnung = document.getElementById('input-zeichnung').value.trim() || "-";
+            var menge = document.getElementById('input-menge').value.trim() || "1";
+            var fehlteile = document.getElementById('input-fehlteile').value.trim();
+            var notiz = document.getElementById('input-notiz').value.trim();
+            
+            // Format-Auswahl auslesen
+            var orientationRadio = document.querySelector('input[name="orientation"]:checked');
+            var orientation = orientationRadio ? orientationRadio.value : 'portrait';
+
+            var extraHtml = '';
+            if (isFehlteilActive) extraHtml += `<div class="warning-box"><h3>ACHTUNG: WARNUNG / FEHLTEILE</h3><p>${escapeHtml(fehlteile) || 'Achtung markiert.'}</p></div>`;
+            if (notiz !== '') extraHtml += `<div class="note-box"><h3>Kommentar / Notiz</h3><p>${escapeHtml(notiz)}</p></div>`;
+            if (isPinProtected) extraHtml += `<div style="text-align:center; font-weight:bold; color:#1e3a8a; margin-top:10px;">🔒 DOKUMENT IST PIN-GESCHÜTZT</div>`;
+            
+            var qrSrc = ""; var canvas = document.querySelector('#qrcode-container canvas');
+            if(canvas) qrSrc = canvas.toDataURL("image/png");
+            var qrLabelText = document.getElementById('qr-label-text').innerText.replace('🔒', '').trim();
+
+            var html = `
+            <!DOCTYPE html><html><head><style>
+            /* HIER WIRD DAS FORMAT DYNAMISCH GESETZT (portrait / landscape) */
+            @page { size: A4 ${orientation}; margin: 15mm; } 
+            
+            body { font-family: Arial, sans-serif; font-size: 14px; color: #000; background: #fff; margin:0; padding:0; }
+            .header { display: flex; align-items: center; border-bottom: 2px solid #ccc; padding-bottom: 10px; margin-bottom: 25px; }
+            .logo { background: #004b87; width: 40px; height: 40px; border-radius: 4px; display: inline-block; } 
+            .logo-text { color: #004b87; font-size: 24px; font-weight: bold; margin-left: 10px; line-height: 1;} 
+            .logo-sub { font-size: 10px; color: #555; display: block; }
+            h1 { font-size: 30px; margin: 0 0 25px 0; border-bottom: 1px solid #000; padding-bottom: 10px;} 
+            table { width: 100%; border-collapse: collapse; table-layout: fixed;}
+            td { padding: 12px; border-bottom: 1px solid #eee; word-wrap: break-word; } 
+            .label { display: block; font-size: 12px; color: #666; text-transform: uppercase; margin-bottom: 5px; }
+            .val { font-size: 18px; font-weight: bold; } 
+            .val-large { font-size: 24px; font-weight: bold; color: #000; }
+            .warning-box { margin-top: 20px; padding: 15px; border: 2px solid #e11d48; background-color: #fff1f2; border-radius: 8px; } 
+            .warning-box h3 { color: #e11d48; margin: 0 0 5px 0; font-size: 16px; font-weight: bold; text-transform: uppercase; } 
+            .warning-box p { margin: 0; font-size: 14px; white-space: pre-wrap; font-weight: bold; color: #9f1239; }
+            .note-box { margin-top: 15px; padding: 15px; border: 2px solid #d97706; background-color: #fffbeb; border-radius: 8px; } 
+            .note-box h3 { color: #d97706; margin: 0 0 5px 0; font-size: 14px; font-weight: bold; text-transform: uppercase; } 
+            .note-box p { margin: 0; font-size: 14px; white-space: pre-wrap; color: #92400e; }
+            .qr-section { margin-top: 40px; text-align: center; border-top: 2px dashed #ccc; padding-top: 30px; } 
+            .qr-box { display: inline-block; padding: 10px; } 
+            .qr-label { font-size: 14px; font-weight: bold; color: #333; margin-top: 15px; display: block; letter-spacing: 2px;}
+            </style></head><body>
+                <div class="header"><svg class="logo" viewBox="0 0 40 40"><rect width="40" height="40" fill="#004b87"/><path d="M26 12C26 12 24.5 10 20 10C15.5 10 13 13 13 16C13 21 27 20 27 25C27 30 23 32 19 32C14.5 32 13 29 13 29" stroke="white" stroke-width="4" stroke-linecap="round"/></svg>
+                <div style="margin-left: 10px;"><div class="logo-text">SIEBENHAAR</div><div class="logo-sub">Antriebstechnik GmbH</div></div></div>
+                <h1>${escapeHtml(docTitle)}: ${escapeHtml(id)}</h1>
+                <table><tr><td><span class="label">Kunde/Abt.</span><span class="val">${escapeHtml(kunde)}</span></td><td><span class="label">Termin / KW</span><span class="val" style="color:#d90429;">${escapeHtml(termin)}</span></td></tr>
+                <tr><td colspan="2"><span class="label">Bezeichnung / Typ</span><span class="val-large">${escapeHtml(bez)}</span></td></tr>
+                <tr><td><span class="label">Zeichnung</span><span class="val" style="font-family: monospace;">${escapeHtml(zeichnung)}</span></td><td><span class="label">Menge</span><span class="val-large" style="color:#059669;">${escapeHtml(menge)}</span></td></tr></table>
+                ${extraHtml}
+                <div class="qr-section"><div class="qr-box">${qrSrc ? `<img src="${qrSrc}" width="200" height="200" />` : ''}</div><span class="qr-label">${qrLabelText}</span></div>
+            </body></html>`;
+            
+            triggerIframePrint(html);
+        }
+
+        function triggerIframePrint(htmlContent) {
+            var iframe = document.getElementById('print-iframe');
+            var doc = iframe.contentWindow.document; doc.open(); doc.write(htmlContent); doc.close();
+            showToast("Druckvorschau wird geladen...");
+            setTimeout(function() { iframe.contentWindow.focus(); try { iframe.contentWindow.print(); } catch(e) { showToast("Drucken fehlgeschlagen."); } }, 400); 
+        }
+
+        function escapeHtml(text) { if(!text) return ""; return String(text).replace(/[&<>"']/g, function(m) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]; }); }
+        
+        function showToast(message) {
+            var toast = document.getElementById('toast'); var toastMsg = document.getElementById('toast-message');
+            if(toast && toastMsg) {
+                toastMsg.innerText = message; toast.classList.replace('-translate-y-20', 'translate-y-0'); toast.classList.replace('opacity-0', 'opacity-100');
+                setTimeout(function() { toast.classList.replace('translate-y-0', '-translate-y-20'); toast.classList.replace('opacity-100', 'opacity-0'); }, 3000);
+            }
+        }
+    </script>
+</body>
+</html>
+
+```
